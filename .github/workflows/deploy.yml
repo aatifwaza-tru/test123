@@ -1,0 +1,49 @@
+name: CD
+
+on:
+  push:
+    branches: [main, qa, dev]
+    paths-ignore:
+      - '.github/**'
+      - '**.md'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Deploy on WP Engine
+        env:
+          WP_ENGINE: ${{ secrets.WPE_SSHG_KEY_PRIVATE }}
+          PROD: ${{ secrets.WPE_PROD_ENV_NAME }}
+          STAG: ${{ secrets.WPE_STAGING_ENV_NAME }}
+          DEV: ${{ secrets.WPE_DEV_ENV_NAME }}
+          REPO_NAME: ${{ github.repository }}
+          BRANCH_BASE: ${{ github.ref_name }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+
+          # Determine branch
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          cd $GITHUB_WORKSPACE
+          git checkout $BRANCH_NAME
+          if [ "$BRANCH_NAME" == "main" ]; then
+            DEPLOY=${PROD}
+          elif [ "$BRANCH_NAME" == "qa" ]; then
+            DEPLOY=${STAG}
+          elif [ "$BRANCH_NAME" == "dev" ]; then
+            DEPLOY=${DEV}
+          else
+            echo "Unknown branch: $BRANCH_NAME"
+            exit 1
+          fi
+          mkdir ~/.ssh
+          echo $WP_ENGINE | base64 --decode >> ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H -p 22 git.wpengine.com >> ~/.ssh/known_hosts
+          git fetch --unshallow origin  # Fetch complete history
+          git add .
+          git remote add production git@git.wpengine.com:production/${DEPLOY}.git
+          git push -f production $BRANCH_NAME
